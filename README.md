@@ -14,7 +14,7 @@ No server, no build step. Everything runs in the browser and your OpenAI API key
 
 ## Run locally
 
-ES modules require an HTTP server (opening `index.html` via `file://` won't work). From this `web/` folder:
+ES modules require an HTTP server (opening `index.html` via `file://` won't work). From the repo root:
 
 ```bash
 python3 -m http.server 8000
@@ -25,17 +25,13 @@ Open **⚙ Settings**, paste your OpenAI API key, confirm the model IDs, and you
 
 ## Deploy to GitHub Pages
 
-This whole `web/` folder is the site — commit it and serve it.
+The app lives at the repo root (`index.html`, `css/`, `js/`, `vendor/`), so serving it is one setting:
 
-**Option A — project pages from a subfolder**
 1. Push the repo to GitHub.
-2. Repo **Settings → Pages → Build and deployment**: Source = *Deploy from a branch*, Branch = `main`, Folder = `/web` (or move these files to the repo root / `/docs`).
+2. Repo **Settings → Pages → Build and deployment**: Source = *Deploy from a branch*, Branch = `main`, Folder = `/ (root)`.
 3. Your app is at `https://<user>.github.io/<repo>/`.
 
-**Option B — dedicated repo**
-Put the contents of `web/` at the repo root of a `<user>.github.io` repo.
-
-> GitHub Pages serves over HTTPS, so the vendored ES modules and OpenAI calls work without extra config. No custom headers are needed.
+> GitHub Pages serves over HTTPS, so the vendored ES modules and OpenAI calls work without extra config. The `.nojekyll` file disables Jekyll so the `vendor/` and `.mjs` files are served untouched.
 
 ## Settings
 
@@ -63,11 +59,11 @@ Calling OpenAI directly from the browser means the API key lives in the page. Th
 ## Files
 
 ```
-web/
-  index.html        app shell
-  css/styles.css    styling
-  js/app.js         all logic
-  vendor/           pdf.js + lamejs (committed, no CDN needed)
+index.html        app shell
+css/styles.css    styling
+js/app.js         all logic
+vendor/           pdf.js + lamejs (committed, no CDN needed)
+.nojekyll         disables Jekyll on GitHub Pages
 ```
 
 ## Relation to `process.py`
