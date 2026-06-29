@@ -1,0 +1,36 @@
+# ── macOS / OS junk ──
+.DS_Store
+Thumbs.db
+
+# ── Python ──
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+env/
+.python-version
+
+# ── Secrets / environment ──
+.env
+.env.*
+secrets.json
+
+# ── Generated audio output ──
+output/
+*.mp3
+
+# ── Node (only if you ever add tooling; vendored libs in web/vendor are NOT ignored) ──
+node_modules/
+
+# ── Editor / IDE ──
+.vscode/
+.idea/
+*.swp
+*~
+
+# ── Claude Code local settings (keep shared settings.json if you add one) ──
+.claude/settings.local.json
