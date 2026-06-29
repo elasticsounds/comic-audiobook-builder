@@ -37,18 +37,31 @@ The app lives at the repo root (`index.html`, `css/`, `js/`, `vendor/`), so serv
 
 | Setting | Default | Notes |
 |---|---|---|
-| OpenAI API key | — | Stored in `localStorage`, sent only to `api.openai.com`. |
+| OpenAI API key | — | Transcript (vision) + OpenAI TTS. Stored in `localStorage`, sent only to `api.openai.com`. |
+| Google Gemini API key | — | Only for Gemini TTS models. Sent only to `generativelanguage.googleapis.com`. |
 | Transcript model | `gpt-5.5` | Must be **vision-capable** and on the **Responses API**. Change if your exact model ID differs. |
-| TTS model | `gpt-4o-mini-tts` | OpenAI `/v1/audio/speech` model. |
+| TTS model | `gpt-4o-mini-tts` | Pick from the dropdown — see TTS models below. |
 | Max pages to read | `40` | Caps vision cost; extra pages are skipped with a warning. |
 | Page image width | `1024` px | Higher = sharper but pricier vision calls. |
 | MP3 bitrate | `128` kbps | Final encode quality. |
+
+### TTS models
+
+| Model | Provider | Notes |
+|---|---|---|
+| `gpt-4o-mini-tts` | OpenAI | Steerable — honors the per-line `instructions` (tone, pace, accent). |
+| `tts-1` | OpenAI | Fast, lower quality. Ignores `instructions`. |
+| `tts-1-hd` | OpenAI | Higher quality. Ignores `instructions`. |
+| `gemini-2.5-flash-preview-tts` | Gemini | Fast. No `instructions` field — delivery notes are folded into the spoken prompt. |
+| `gemini-2.5-pro-preview-tts` | Gemini | Higher quality. Same prompt-based steering. |
+
+OpenAI and Gemini use **different voice sets** (e.g. `alloy`/`onyx` vs `Kore`/`Puck`). Switching the model between providers automatically re-maps each character to a distinct voice in the new provider's set; you can also hit **↻ Auto-assign distinct voices** or pick per character. Use **▶** next to each character to audition before generating. The transcript step is always OpenAI (vision), so an OpenAI key is required regardless of which TTS provider you use.
 
 ## How it works
 
 - **PDF** → [`pdf.js`](https://mozilla.github.io/pdf.js/) renders each page to a JPEG and pulls any embedded text.
 - **Transcript** → pages are sent to the OpenAI **Responses API** with a strict JSON schema, returning `{ title, voices, items[] }`. Each item has `id, page, panel, type, speaker, voice, emotion, instructions, text, pause_after_ms`.
-- **TTS** → each item is POSTed to `/v1/audio/speech` (with retry); the returned MP3 is decoded via Web Audio.
+- **TTS** → each item is voiced (with retry). OpenAI returns MP3; Gemini returns base64 PCM (16-bit/24 kHz/mono). Both are decoded to a Web Audio buffer.
 - **Stitching** → an `OfflineAudioContext` concatenates every segment at 44.1 kHz mono, inserting `pause_after_ms` of silence after each line.
 - **MP3** → the mixed buffer is encoded with [`lamejs`](https://github.com/zhuker/lamejs) and downloaded.
 

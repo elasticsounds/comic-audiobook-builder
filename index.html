@@ -27,7 +27,12 @@
       <label>
         OpenAI API key
         <input id="apiKey" type="password" placeholder="sk-..." autocomplete="off" spellcheck="false" />
-        <small>Stored only in this browser (localStorage). Sent directly to api.openai.com.</small>
+        <small>Used for the transcript (vision) and OpenAI TTS. Stored only in this browser.</small>
+      </label>
+      <label>
+        Google Gemini API key
+        <input id="geminiKey" type="password" placeholder="AIza..." autocomplete="off" spellcheck="false" />
+        <small>Only needed for Gemini TTS models. Sent directly to generativelanguage.googleapis.com.</small>
       </label>
       <label>
         Transcript model (vision)
@@ -36,7 +41,18 @@
       </label>
       <label>
         TTS model
-        <input id="ttsModel" type="text" placeholder="gpt-4o-mini-tts" />
+        <select id="ttsModel">
+          <optgroup label="OpenAI">
+            <option value="gpt-4o-mini-tts">OpenAI · gpt-4o-mini-tts (steerable)</option>
+            <option value="tts-1">OpenAI · tts-1 (fast)</option>
+            <option value="tts-1-hd">OpenAI · tts-1-hd (higher quality)</option>
+          </optgroup>
+          <optgroup label="Google Gemini">
+            <option value="gemini-2.5-flash-preview-tts">Gemini · 2.5 Flash TTS (preview)</option>
+            <option value="gemini-2.5-pro-preview-tts">Gemini · 2.5 Pro TTS (preview)</option>
+          </optgroup>
+        </select>
+        <small>Switching providers re-maps character voices to that provider's set.</small>
       </label>
       <label>
         Max pages to read
@@ -90,10 +106,14 @@
         </div>
       </div>
 
-      <details id="voicesDetails" class="voices">
-        <summary>Speaker → voice map</summary>
+      <details id="voicesDetails" class="voices" open>
+        <summary>Speaker → voice map — click ▶ to audition each voice</summary>
         <div id="voicesEditor" class="voices-grid"></div>
-        <button id="addVoiceBtn" class="btn ghost small" type="button">+ Add speaker</button>
+        <div class="actions">
+          <button id="addVoiceBtn" class="btn ghost small" type="button">+ Add speaker</button>
+          <button id="autoVoiceBtn" class="btn ghost small" type="button">↻ Auto-assign distinct voices</button>
+          <span id="providerNote" class="status muted"></span>
+        </div>
       </details>
 
       <div class="table-wrap">

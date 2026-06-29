@@ -147,9 +147,10 @@ input:focus, textarea:focus, select:focus { outline: 2px solid var(--accent); ou
   display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
   gap: 0.6rem; margin: 0.6rem 0;
 }
-.voice-pair { display: flex; gap: 0.4rem; }
-.voice-pair input { flex: 1; }
-.voice-pair select { flex: 1; }
+.voice-pair { display: flex; gap: 0.4rem; align-items: center; }
+.voice-pair input { flex: 1; min-width: 0; }
+.voice-pair select { flex: 1; min-width: 0; }
+.preview-btn { padding: 0.35rem 0.55rem; min-width: 2.1rem; justify-content: center; }
 
 .table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 8px; }
 table.items { border-collapse: collapse; width: 100%; min-width: 900px; font-size: 0.82rem; }

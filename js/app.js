@@ -6,10 +6,34 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = new URL('../vendor/pdf.worker.min.mjs',
 
 // ── Constants ──────────────────────────────────────────────────────────────
 const OPENAI_VOICES = ['alloy', 'ash', 'ballad', 'coral', 'echo', 'fable', 'nova', 'onyx', 'sage', 'shimmer', 'verse'];
+// Gemini prebuilt voice names (single-speaker TTS).
+const GEMINI_VOICES = [
+  'Zephyr', 'Puck', 'Charon', 'Kore', 'Fenrir', 'Leda', 'Orus', 'Aoede', 'Callirrhoe', 'Autonoe',
+  'Enceladus', 'Iapetus', 'Umbriel', 'Algieba', 'Despina', 'Erinome', 'Algenib', 'Rasalgethi',
+  'Laomedeia', 'Achernar', 'Alnilam', 'Schedar', 'Gacrux', 'Pulcherrima', 'Achird', 'Zubenelgenubi',
+  'Vindemiatrix', 'Sadachbia', 'Sadaltager', 'Sulafat',
+];
 const ITEM_TYPES = ['narration', 'dialogue', 'caption', 'sfx'];
+
+// TTS model registry. provider drives endpoint/auth/voice-set; `instructions` = supports a delivery param.
+const TTS_MODELS = [
+  { id: 'gpt-4o-mini-tts', provider: 'openai', instructions: true },
+  { id: 'tts-1', provider: 'openai', instructions: false },
+  { id: 'tts-1-hd', provider: 'openai', instructions: false },
+  { id: 'gemini-2.5-flash-preview-tts', provider: 'gemini', instructions: false },
+  { id: 'gemini-2.5-pro-preview-tts', provider: 'gemini', instructions: false },
+];
+function modelInfo(id) {
+  return TTS_MODELS.find((m) => m.id === id)
+    || { id, provider: /gemini/i.test(id) ? 'gemini' : 'openai', instructions: id === 'gpt-4o-mini-tts' };
+}
+function providerOf(id) { return modelInfo(id).provider; }
+function voicesFor(id) { return providerOf(id) === 'gemini' ? GEMINI_VOICES : OPENAI_VOICES; }
+function defaultVoiceFor(id) { return voicesFor(id)[0]; }
 
 const LS = {
   apiKey: 'cab_apiKey',
+  geminiKey: 'cab_geminiKey',
   transcriptModel: 'cab_transcriptModel',
   ttsModel: 'cab_ttsModel',
   maxPages: 'cab_maxPages',
@@ -96,13 +120,13 @@ const state = {
 const $ = (id) => document.getElementById(id);
 const el = {
   settingsToggle: $('settingsToggle'), settings: $('settings'),
-  apiKey: $('apiKey'), transcriptModel: $('transcriptModel'), ttsModel: $('ttsModel'),
+  apiKey: $('apiKey'), geminiKey: $('geminiKey'), transcriptModel: $('transcriptModel'), ttsModel: $('ttsModel'),
   maxPages: $('maxPages'), maxWidth: $('maxWidth'), bitrate: $('bitrate'),
   dropZone: $('dropZone'), fileInput: $('fileInput'), pdfInfo: $('pdfInfo'),
   genTranscriptBtn: $('genTranscriptBtn'), transcriptStatus: $('transcriptStatus'),
   stepEdit: $('step-edit'), stepAudio: $('step-audio'),
   metaTitle: $('metaTitle'), downloadJsonBtn: $('downloadJsonBtn'), importJsonInput: $('importJsonInput'),
-  voicesEditor: $('voicesEditor'), addVoiceBtn: $('addVoiceBtn'),
+  voicesEditor: $('voicesEditor'), addVoiceBtn: $('addVoiceBtn'), autoVoiceBtn: $('autoVoiceBtn'), providerNote: $('providerNote'),
   itemsBody: $('itemsBody'), addLineBtn: $('addLineBtn'), saveStatus: $('saveStatus'),
   rawJson: $('rawJson'), applyRawBtn: $('applyRawBtn'), rawStatus: $('rawStatus'),
   genAudioBtn: $('genAudioBtn'), cancelAudioBtn: $('cancelAudioBtn'), downloadAudioBtn: $('downloadAudioBtn'),
@@ -132,6 +156,7 @@ function setProgress(done, total, label) {
 // ── Settings persistence ─────────────────────────────────────────────────
 function loadSettings() {
   el.apiKey.value = localStorage.getItem(LS.apiKey) || '';
+  el.geminiKey.value = localStorage.getItem(LS.geminiKey) || '';
   el.transcriptModel.value = localStorage.getItem(LS.transcriptModel) || DEFAULTS.transcriptModel;
   el.ttsModel.value = localStorage.getItem(LS.ttsModel) || DEFAULTS.ttsModel;
   el.maxPages.value = localStorage.getItem(LS.maxPages) || DEFAULTS.maxPages;
@@ -144,6 +169,7 @@ function bindSetting(input, key) {
 function settings() {
   return {
     apiKey: el.apiKey.value.trim(),
+    geminiKey: el.geminiKey.value.trim(),
     transcriptModel: el.transcriptModel.value.trim() || DEFAULTS.transcriptModel,
     ttsModel: el.ttsModel.value.trim() || DEFAULTS.ttsModel,
     maxPages: Math.max(1, parseInt(el.maxPages.value, 10) || DEFAULTS.maxPages),
@@ -332,7 +358,8 @@ function normalizeScript(raw) {
   }));
   return script;
 }
-function pickVoice(v) { return OPENAI_VOICES.includes(v) ? v : 'alloy'; }
+// Keep any recognized voice (either provider); otherwise fall back to the current provider's default.
+function pickVoice(v) { return OPENAI_VOICES.includes(v) || GEMINI_VOICES.includes(v) ? v : defaultVoiceFor(el.ttsModel.value); }
 
 // ── Persistence of script ──────────────────────────────────────────────────
 let saveTimer = null;
@@ -367,18 +394,33 @@ function loadSavedScript() {
 // ── Transcript editor rendering ────────────────────────────────────────────
 function renderEditor() {
   el.metaTitle.value = state.script.title || '';
+  reconcileVoices();
   renderVoices();
   renderItems();
   syncRaw();
+  updateProviderNote();
+}
+
+// Ensure every speaker used in items appears in the voice map (so all are auditionable).
+function reconcileVoices() {
+  const have = new Set(state.script.voices.map((v) => v.speaker));
+  for (const it of state.script.items) {
+    if (it.speaker && !have.has(it.speaker)) {
+      state.script.voices.push({ speaker: it.speaker, voice: it.voice });
+      have.add(it.speaker);
+    }
+  }
 }
 
 el.metaTitle.addEventListener('input', () => { state.script.title = el.metaTitle.value; persistScript(); syncRaw(); });
 
 function voiceSelect(value, onChange) {
   const sel = document.createElement('select');
-  for (const v of OPENAI_VOICES) {
+  const list = voicesFor(el.ttsModel.value);
+  const options = list.includes(value) || !value ? list : [value, ...list]; // keep out-of-set value visible
+  for (const v of options) {
     const opt = document.createElement('option');
-    opt.value = v; opt.textContent = v;
+    opt.value = v; opt.textContent = list.includes(v) ? v : `${v} (not in current provider)`;
     if (v === value) opt.selected = true;
     sel.appendChild(opt);
   }
@@ -395,17 +437,122 @@ function renderVoices() {
     speaker.type = 'text'; speaker.value = pair.speaker; speaker.placeholder = 'speaker';
     speaker.addEventListener('input', () => { pair.speaker = speaker.value; persistScript(); syncRaw(); });
     const sel = voiceSelect(pair.voice, (v) => { pair.voice = v; persistScript(); syncRaw(); });
+    const preview = document.createElement('button');
+    preview.className = 'btn ghost small preview-btn'; preview.type = 'button';
+    preview.textContent = '▶'; preview.title = 'Audition this voice with one of the character’s lines';
+    preview.addEventListener('click', () => {
+      const sample = sampleForSpeaker(pair.speaker);
+      previewVoice({ voice: pair.voice, instructions: sample.instructions, text: sample.text }, preview);
+    });
     const del = document.createElement('button');
     del.className = 'del-row'; del.textContent = '✕'; del.title = 'Remove';
-    del.addEventListener('click', () => { state.script.voices.splice(idx, 1); renderVoices(); persistScript(); syncRaw(); });
-    wrap.append(speaker, sel, del);
+    del.addEventListener('click', () => { stopPreview(); state.script.voices.splice(idx, 1); renderVoices(); persistScript(); syncRaw(); });
+    wrap.append(speaker, sel, preview, del);
     el.voicesEditor.appendChild(wrap);
   });
 }
 el.addVoiceBtn.addEventListener('click', () => {
-  state.script.voices.push({ speaker: '', voice: 'alloy' });
+  state.script.voices.push({ speaker: '', voice: defaultVoiceFor(el.ttsModel.value) });
   renderVoices(); persistScript(); syncRaw();
 });
+
+// Give each distinct speaker a distinct voice from the current provider's set (cycling if needed).
+function autoAssignVoices() {
+  const list = voicesFor(el.ttsModel.value);
+  const speakers = [...new Set(state.script.items.map((i) => i.speaker).filter(Boolean))];
+  const map = new Map(speakers.map((sp, i) => [sp, list[i % list.length]]));
+  for (const it of state.script.items) if (map.has(it.speaker)) it.voice = map.get(it.speaker);
+  for (const v of state.script.voices) if (map.has(v.speaker)) v.voice = map.get(v.speaker);
+}
+
+// Are all assigned voices valid for the current provider?
+function voicesValidForProvider() {
+  const list = voicesFor(el.ttsModel.value);
+  return state.script.items.every((it) => list.includes(it.voice));
+}
+
+function updateProviderNote() {
+  if (!el.providerNote) return;
+  const prov = providerOf(el.ttsModel.value);
+  el.providerNote.textContent = prov === 'gemini' ? 'Gemini voices' : 'OpenAI voices';
+}
+
+el.autoVoiceBtn?.addEventListener('click', () => {
+  if (!state.script) return;
+  autoAssignVoices();
+  renderVoices(); renderItems(); persistScript(); syncRaw();
+});
+
+// Model change: persist, and re-map voices if the new provider uses a different voice set.
+el.ttsModel.addEventListener('change', () => {
+  localStorage.setItem(LS.ttsModel, el.ttsModel.value);
+  if (state.script && !voicesValidForProvider()) {
+    autoAssignVoices();
+    setStatus(el.saveStatus, `Re-mapped voices to ${providerOf(el.ttsModel.value)} set`, 'muted');
+  }
+  if (state.script) { renderVoices(); renderItems(); persistScript(); syncRaw(); }
+  updateProviderNote();
+});
+
+// ── Voice audition ─────────────────────────────────────────────────────────
+const previewCache = new Map(); // key -> AudioBuffer
+let previewCtx = null;          // shared AudioContext for decoding + playback
+let currentPreview = null;      // { source, btn }
+
+function getPreviewCtx() {
+  if (!previewCtx) previewCtx = new (window.AudioContext || window.webkitAudioContext)();
+  return previewCtx;
+}
+
+function sampleForSpeaker(speaker) {
+  const it = state.script.items.find((i) => i.speaker === speaker && i.text.trim());
+  if (it) return { text: truncateSentence(it.text, 220), instructions: it.instructions };
+  return { text: `Hello, I'm ${speaker || 'this character'}. This is how my voice sounds in the audiobook.`, instructions: '' };
+}
+
+function stopPreview() {
+  if (!currentPreview) return;
+  try { currentPreview.source.stop(); } catch { /* already stopped */ }
+  currentPreview.btn.textContent = '▶';
+  currentPreview = null;
+}
+
+async function previewVoice({ voice, instructions, text }, btn) {
+  const cfg = settings();
+  const provider = providerOf(cfg.ttsModel);
+  const keyMissing = provider === 'gemini' ? !cfg.geminiKey : !cfg.apiKey;
+  if (keyMissing) {
+    el.settings.classList.remove('hidden');
+    setStatus(el.transcriptStatus, `Add your ${provider === 'gemini' ? 'Gemini' : 'OpenAI'} API key in Settings to preview voices.`, 'err');
+    return;
+  }
+  // Clicking the button that's currently playing stops it.
+  if (currentPreview && currentPreview.btn === btn) { stopPreview(); return; }
+  stopPreview();
+
+  btn.disabled = true; btn.textContent = '…';
+  try {
+    const ctx = getPreviewCtx();
+    if (ctx.state === 'suspended') await ctx.resume();
+    const key = `${cfg.ttsModel}|${voice}|${instructions || ''}|${text}`;
+    let buffer = previewCache.get(key);
+    if (!buffer) {
+      buffer = await synthesize(cfg, { voice, text, instructions }, ctx);
+      previewCache.set(key, buffer);
+    }
+    const source = ctx.createBufferSource();
+    source.buffer = buffer;
+    source.connect(ctx.destination);
+    source.onended = () => { if (currentPreview && currentPreview.source === source) stopPreview(); };
+    btn.disabled = false; btn.textContent = '⏹';
+    currentPreview = { source, btn };
+    source.start();
+  } catch (err) {
+    btn.disabled = false; btn.textContent = '⚠';
+    setStatus(el.transcriptStatus, `Preview failed: ${err.message}`, 'err');
+    setTimeout(() => { if (btn.textContent === '⚠') btn.textContent = '▶'; }, 2200);
+  }
+}
 
 function textInput(value, onChange, cls) {
   const inp = document.createElement('input');
@@ -463,7 +610,7 @@ el.addLineBtn.addEventListener('click', () => {
   const n = state.script.items.length + 1;
   state.script.items.push({
     id: `line_${String(n).padStart(3, '0')}`, page: 0, panel: 0, type: 'narration',
-    speaker: 'narrator', voice: 'alloy', emotion: '', instructions: '', text: '', pause_after_ms: 300,
+    speaker: 'narrator', voice: defaultVoiceFor(el.ttsModel.value), emotion: '', instructions: '', text: '', pause_after_ms: 300,
   });
   renderItems(); persistScript(); syncRaw();
 });
@@ -503,8 +650,15 @@ el.cancelAudioBtn.addEventListener('click', () => { state.cancel = true; logWarn
 
 async function generateAudiobook() {
   if (state.generating) return;
+  stopPreview();
   const cfg = settings();
-  if (!cfg.apiKey) { el.settings.classList.remove('hidden'); logErr('Add your API key in Settings.'); return; }
+  const info = modelInfo(cfg.ttsModel);
+  const needGemini = info.provider === 'gemini';
+  if (needGemini ? !cfg.geminiKey : !cfg.apiKey) {
+    el.settings.classList.remove('hidden');
+    logErr(`Add your ${needGemini ? 'Gemini' : 'OpenAI'} API key in Settings.`);
+    return;
+  }
   if (!state.script?.items?.length) { logErr('No transcript to voice.'); return; }
 
   state.generating = true; state.cancel = false;
@@ -515,7 +669,14 @@ async function generateAudiobook() {
   el.console.textContent = '';
 
   const items = state.script.items;
-  log(`Starting audiobook: ${items.length} line(s), model ${cfg.ttsModel}.`);
+  log(`Starting audiobook: ${items.length} line(s), model ${cfg.ttsModel} (${info.provider}).`);
+  if (!info.instructions && items.some((it) => it.instructions?.trim())) {
+    logWarn(needGemini
+      ? 'Gemini has no instructions field — delivery notes are folded into the spoken prompt text.'
+      : `${cfg.ttsModel} ignores the "instructions" field (only gpt-4o-mini-tts is steerable).`);
+  }
+  const badVoices = items.filter((it) => !voicesFor(cfg.ttsModel).includes(it.voice));
+  if (badVoices.length) logWarn(`${badVoices.length} line(s) have a voice not valid for ${info.provider} — click "Auto-assign distinct voices" to fix.`);
   setProgress(0, items.length, `0/${items.length}`);
 
   const decodeCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -567,28 +728,78 @@ async function ttsWithRetry(cfg, item, decodeCtx, attempts = 3) {
   let lastErr;
   for (let a = 1; a <= attempts; a++) {
     try {
-      const body = {
-        model: cfg.ttsModel,
-        voice: item.voice,
-        input: item.text,
-        response_format: 'mp3',
-      };
-      if (item.instructions) body.instructions = item.instructions;
-      const resp = await fetch('https://api.openai.com/v1/audio/speech', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${cfg.apiKey}` },
-        body: JSON.stringify(body),
-      });
-      if (!resp.ok) throw new Error(await describeHttpError(resp));
-      const arr = await resp.arrayBuffer();
-      // decodeAudioData detaches the buffer, so pass a copy.
-      return await decodeCtx.decodeAudioData(arr.slice(0));
+      return await synthesize(cfg, item, decodeCtx);
     } catch (err) {
       lastErr = err;
       if (a < attempts) { logWarn(`  retry ${a}/${attempts - 1}: ${err.message}`); await sleep(800 * a); }
     }
   }
   throw lastErr;
+}
+
+// Provider-agnostic: returns a decoded AudioBuffer for one line.
+async function synthesize(cfg, item, ctx) {
+  return providerOf(cfg.ttsModel) === 'gemini'
+    ? synthGemini(cfg, item, ctx)
+    : synthOpenAI(cfg, item, ctx);
+}
+
+async function synthOpenAI(cfg, { voice, text, instructions }, ctx) {
+  const body = { model: cfg.ttsModel, voice, input: text, response_format: 'mp3' };
+  if (instructions && modelInfo(cfg.ttsModel).instructions) body.instructions = instructions;
+  const resp = await fetch('https://api.openai.com/v1/audio/speech', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${cfg.apiKey}` },
+    body: JSON.stringify(body),
+  });
+  if (!resp.ok) throw new Error(await describeHttpError(resp));
+  const arr = await resp.arrayBuffer();
+  return ctx.decodeAudioData(arr.slice(0)); // slice: decodeAudioData detaches the buffer
+}
+
+async function synthGemini(cfg, { voice, text, instructions }, ctx) {
+  if (!cfg.geminiKey) throw new Error('Add your Gemini API key in Settings.');
+  // Gemini has no separate instructions field — style is steered via the prompt text.
+  const prompt = instructions ? `${instructions.trim()}:\n${text}` : text;
+  const body = {
+    contents: [{ parts: [{ text: prompt }] }],
+    generationConfig: {
+      responseModalities: ['AUDIO'],
+      speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: voice } } },
+    },
+  };
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(cfg.ttsModel)}:generateContent?key=${encodeURIComponent(cfg.geminiKey)}`;
+  const resp = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!resp.ok) throw new Error(await describeHttpError(resp));
+  const data = await resp.json();
+  const part = data?.candidates?.[0]?.content?.parts?.find((p) => p.inlineData?.data);
+  if (!part) {
+    const reason = data?.promptFeedback?.blockReason || data?.candidates?.[0]?.finishReason;
+    throw new Error(`Gemini returned no audio${reason ? ` (${reason})` : ''}.`);
+  }
+  const rate = parseInt((part.inlineData.mimeType || '').match(/rate=(\d+)/)?.[1] || '24000', 10);
+  return pcm16ToAudioBuffer(base64ToBytes(part.inlineData.data), rate, ctx);
+}
+
+function base64ToBytes(b64) {
+  const bin = atob(b64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return bytes;
+}
+
+// Raw signed-16-bit little-endian PCM (mono) → AudioBuffer at the given sample rate.
+function pcm16ToAudioBuffer(bytes, sampleRate, ctx) {
+  const samples = Math.floor(bytes.byteLength / 2);
+  const view = new DataView(bytes.buffer, bytes.byteOffset, samples * 2);
+  const buffer = ctx.createBuffer(1, samples || 1, sampleRate);
+  const ch = buffer.getChannelData(0);
+  for (let i = 0; i < samples; i++) ch[i] = view.getInt16(i * 2, true) / 32768;
+  return buffer;
 }
 
 // Concatenate decoded buffers with silence gaps into one mono 44.1k buffer.
@@ -636,6 +847,13 @@ function floatToInt16(float32) {
 // ── Small helpers ──────────────────────────────────────────────────────────
 function setStatus(node, msg, cls) { node.textContent = msg; node.className = `status ${cls || ''}`.trim(); }
 function truncate(s, n) { return s.length > n ? s.slice(0, n) + '…' : s; }
+function truncateSentence(s, max) {
+  s = s.trim();
+  if (s.length <= max) return s;
+  const cut = s.slice(0, max);
+  const stop = Math.max(cut.lastIndexOf('. '), cut.lastIndexOf('! '), cut.lastIndexOf('? '));
+  return (stop > 40 ? cut.slice(0, stop + 1) : cut).trim() + '…';
+}
 function slug(s) { return (s || 'audiobook').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '') || 'audiobook'; }
 function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
 function triggerDownload(blob, filename) {
@@ -648,7 +866,9 @@ function triggerDownload(blob, filename) {
 
 // ── Init ─────────────────────────────────────────────────────────────────
 loadSettings();
-[['apiKey', LS.apiKey], ['transcriptModel', LS.transcriptModel], ['ttsModel', LS.ttsModel],
+// ttsModel has its own change handler (provider switching), so it's not in this list.
+[['apiKey', LS.apiKey], ['geminiKey', LS.geminiKey], ['transcriptModel', LS.transcriptModel],
  ['maxPages', LS.maxPages], ['maxWidth', LS.maxWidth], ['bitrate', LS.bitrate]]
   .forEach(([k, key]) => bindSetting(el[k], key));
+updateProviderNote();
 loadSavedScript();
