@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Comic Audiobook Studio</title>
+  <link rel="stylesheet" href="css/styles.css" />
+  <!-- lamejs (MP3 encoder) is a classic UMD script; exposes window.lamejs -->
+  <script src="vendor/lame.min.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo">🎧</span>
+      <div>
+        <h1>Comic Audiobook Studio</h1>
+        <p class="tagline">PDF → GPT transcript → OpenAI TTS → one MP3. All in your browser.</p>
+      </div>
+    </div>
+    <button id="settingsToggle" class="btn ghost" type="button" aria-expanded="false">⚙ Settings</button>
+  </header>
+
+  <!-- ───────────────────────── Settings ───────────────────────── -->
+  <section id="settings" class="panel settings hidden">
+    <h2>Settings</h2>
+    <div class="settings-grid">
+      <label>
+        OpenAI API key
+        <input id="apiKey" type="password" placeholder="sk-..." autocomplete="off" spellcheck="false" />
+        <small>Stored only in this browser (localStorage). Sent directly to api.openai.com.</small>
+      </label>
+      <label>
+        Transcript model (vision)
+        <input id="transcriptModel" type="text" placeholder="gpt-5.5" />
+        <small>Must be a vision-capable model on the Responses API. Change if your model ID differs.</small>
+      </label>
+      <label>
+        TTS model
+        <input id="ttsModel" type="text" placeholder="gpt-4o-mini-tts" />
+      </label>
+      <label>
+        Max pages to read
+        <input id="maxPages" type="number" min="1" max="200" value="40" />
+        <small>Caps vision cost. Extra pages are skipped with a warning.</small>
+      </label>
+      <label>
+        Page image width (px)
+        <input id="maxWidth" type="number" min="512" max="2048" step="128" value="1024" />
+        <small>Higher = sharper but pricier vision calls.</small>
+      </label>
+      <label>
+        MP3 bitrate (kbps)
+        <input id="bitrate" type="number" min="64" max="320" step="32" value="128" />
+      </label>
+    </div>
+    <p class="hint">⚠ This page calls OpenAI from the browser with your own key. Only deploy it where you trust who can use it; anyone using your hosted copy must enter their own key.</p>
+  </section>
+
+  <main>
+    <!-- ───────────── Step 1: Drop PDF ───────────── -->
+    <section class="panel step" id="step-pdf">
+      <h2><span class="step-num">1</span> Drop a PDF</h2>
+      <div id="dropZone" class="dropzone" tabindex="0" role="button" aria-label="Drop a PDF or click to choose">
+        <div class="dz-inner">
+          <span class="dz-icon">📄</span>
+          <p><strong>Drag a PDF here</strong> or click to choose</p>
+          <p id="pdfInfo" class="muted">No file loaded.</p>
+        </div>
+        <input id="fileInput" type="file" accept="application/pdf,.pdf" hidden />
+      </div>
+      <div class="actions">
+        <button id="genTranscriptBtn" class="btn primary" type="button" disabled>Generate transcript with GPT</button>
+        <span id="transcriptStatus" class="status"></span>
+      </div>
+    </section>
+
+    <!-- ───────────── Step 2: Edit transcript ───────────── -->
+    <section class="panel step hidden" id="step-edit">
+      <h2><span class="step-num">2</span> Review &amp; edit transcript</h2>
+
+      <div class="meta-row">
+        <label class="grow">Title
+          <input id="metaTitle" type="text" placeholder="Audiobook title" />
+        </label>
+        <div class="meta-buttons">
+          <button id="downloadJsonBtn" class="btn ghost" type="button">⬇ Export JSON</button>
+          <label class="btn ghost file-label">⬆ Import JSON
+            <input id="importJsonInput" type="file" accept="application/json,.json" hidden />
+          </label>
+        </div>
+      </div>
+
+      <details id="voicesDetails" class="voices">
+        <summary>Speaker → voice map</summary>
+        <div id="voicesEditor" class="voices-grid"></div>
+        <button id="addVoiceBtn" class="btn ghost small" type="button">+ Add speaker</button>
+      </details>
+
+      <div class="table-wrap">
+        <table id="itemsTable" class="items">
+          <thead>
+            <tr>
+              <th>#</th><th>Pg</th><th>Type</th><th>Speaker</th><th>Voice</th>
+              <th>Emotion</th><th>Instructions</th><th>Text</th><th>Pause<br>(ms)</th><th></th>
+            </tr>
+          </thead>
+          <tbody id="itemsBody"></tbody>
+        </table>
+      </div>
+      <div class="actions">
+        <button id="addLineBtn" class="btn ghost small" type="button">+ Add line</button>
+        <span id="saveStatus" class="status muted">Saved locally</span>
+      </div>
+
+      <details id="rawDetails" class="raw">
+        <summary>Advanced: raw JSON</summary>
+        <textarea id="rawJson" spellcheck="false" rows="14"></textarea>
+        <div class="actions">
+          <button id="applyRawBtn" class="btn" type="button">Apply JSON</button>
+          <span id="rawStatus" class="status"></span>
+        </div>
+      </details>
+    </section>
+
+    <!-- ───────────── Step 3: Generate audiobook ───────────── -->
+    <section class="panel step hidden" id="step-audio">
+      <h2><span class="step-num">3</span> Generate audiobook</h2>
+      <div class="actions">
+        <button id="genAudioBtn" class="btn primary" type="button">▶ Generate audiobook</button>
+        <button id="cancelAudioBtn" class="btn ghost hidden" type="button">Cancel</button>
+        <a id="downloadAudioBtn" class="btn success hidden" download>⬇ Download MP3</a>
+      </div>
+      <div class="progress-wrap">
+        <div class="progress"><div id="progressBar" class="progress-bar"></div></div>
+        <span id="progressLabel" class="status muted"></span>
+      </div>
+      <pre id="console" class="console" aria-live="polite"></pre>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <span>Runs entirely client-side · No server · <a href="https://github.com/" id="repoLink" target="_blank" rel="noopener">source</a></span>
+  </footer>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
